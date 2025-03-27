@@ -4,6 +4,8 @@ use anchor_lang::solana_program::instruction::Instruction;
 use std::convert::Into;
 use std::ops::Deref;
 
+pub mod utils;
+
 declare_id!("CQGjzX8tN5AdEjzRkRJoVsxQtbdYpwvFJ8nVm6SQDJJp");
 
 #[program]
@@ -322,4 +324,6 @@ pub enum ErrorCodeMultiSig {
     InvalidThreshold,
     #[msg("Owners must be unique")]
     UniqueOwners,
+    #[msg("Signature verification failed.")]
+    SigVerificationFailed,
 }
