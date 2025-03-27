@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
 use anchor_lang::solana_program::instruction::Instruction;
+use solana_program::sysvar::instructions::{load_instruction_at_checked, ID as IX_ID};
 use std::convert::Into;
 use std::ops::Deref;
 
@@ -15,7 +16,7 @@ pub mod multisig {
     // Initializes a new multisig account with a set of owners and a threshold.
     pub fn create_multisig(
         ctx: Context<CreateMultisig>,
-        owners: Vec<Pubkey>,
+        owners: Vec<[u8; 20]>,
         threshold: u64,
         nonce: u8,
     ) -> Result<()> {
@@ -31,6 +32,7 @@ pub mod multisig {
         multisig.threshold = threshold;
         multisig.nonce = nonce;
         multisig.owner_set_seqno = 0;
+        multisig.last_transaction_id = 0;
         Ok(())
     }
 
@@ -41,13 +43,26 @@ pub mod multisig {
         pid: Pubkey,
         accs: Vec<TransactionAccount>,
         data: Vec<u8>,
+        eth_address: [u8; 20],
+        sig: [u8; 64],
+        recovery_id: u8,
     ) -> Result<()> {
+        // Get what should be the Secp256k1Program instruction
+        let ix: Instruction = load_instruction_at_checked(0, &ctx.accounts.ix_sysvar)?;
+
+        let last_transaction_id = ctx.accounts.multisig.last_transaction_id;
+        let mut bytes_last_transaction_id = last_transaction_id.to_le_bytes().to_vec();
+        bytes_last_transaction_id.push(ctx.accounts.multisig.nonce);
+        let msg = bytes_last_transaction_id;
+        // Check that ix is what we expect to have been sent
+        utils::verify_secp256k1_ix(&ix, &eth_address, &msg, &sig, recovery_id)?;
+
         let owner_index = ctx
             .accounts
             .multisig
             .owners
             .iter()
-            .position(|a| a == ctx.accounts.proposer.key)
+            .position(|a| a == &eth_address)
             .ok_or(ErrorCodeMultiSig::InvalidOwner)?;
 
         let mut signers = Vec::new();
@@ -62,18 +77,37 @@ pub mod multisig {
         tx.multisig = ctx.accounts.multisig.key();
         tx.did_execute = false;
         tx.owner_set_seqno = ctx.accounts.multisig.owner_set_seqno;
+        tx.transaction_id = last_transaction_id;
+
+        ctx.accounts.multisig.last_transaction_id += 1;
 
         Ok(())
     }
 
     // Approves a transaction on behalf of an owner of the multisig.
-    pub fn approve(ctx: Context<Approve>) -> Result<()> {
+    pub fn approve(
+        ctx: Context<Approve>,
+        eth_address: [u8; 20],
+        sig: [u8; 64],
+        recovery_id: u8,
+    ) -> Result<()> {
+        // Get what should be the Secp256k1Program instruction
+        let ix: Instruction = load_instruction_at_checked(0, &ctx.accounts.ix_sysvar)?;
+
+        let last_transaction_id = ctx.accounts.multisig.last_transaction_id;
+        let mut bytes_last_transaction_id = last_transaction_id.to_le_bytes().to_vec();
+        bytes_last_transaction_id.push(ctx.accounts.multisig.nonce);
+        bytes_last_transaction_id.push(1); //just to make it different from create_transaction msg
+        let msg = bytes_last_transaction_id;
+
+        // Check that ix is what we expect to have been sent
+        utils::verify_secp256k1_ix(&ix, &eth_address, &msg, &sig, recovery_id)?;
         let owner_index = ctx
             .accounts
             .multisig
             .owners
             .iter()
-            .position(|a| a == ctx.accounts.owner.key)
+            .position(|a| a == &eth_address)
             .ok_or(ErrorCodeMultiSig::InvalidOwner)?;
 
         ctx.accounts.transaction.signers[owner_index] = true;
@@ -84,7 +118,7 @@ pub mod multisig {
     // Set owners and threshold at once.
     pub fn update_owners<'info>(
         ctx: Context<'_, '_, '_, 'info, Auth<'info>>,
-        owners: Vec<Pubkey>,
+        owners: Vec<[u8; 20]>,
     ) -> Result<()> {
         assert_unique_owners(&owners)?;
         Ok(set_owners(
@@ -108,7 +142,7 @@ pub mod multisig {
 
     // Sets the owners field on the multisig. The only way this can be invoked
     // is via a recursive call from execute_transaction -> set_owners.
-    pub fn set_owners(ctx: Context<Auth>, owners: Vec<Pubkey>) -> Result<()> {
+    pub fn set_owners(ctx: Context<Auth>, owners: Vec<[u8; 20]>) -> Result<()> {
         //todo check if the owners are unique
         require!(!owners.is_empty(), ErrorCodeMultiSig::InvalidOwnersLen);
 
@@ -182,7 +216,7 @@ pub mod multisig {
     }
 }
 
-fn assert_unique_owners(owners: &[Pubkey]) -> Result<()> {
+fn assert_unique_owners(owners: &[[u8; 20]]) -> Result<()> {
     for (i, owner) in owners.iter().enumerate() {
         require!(
             !owners.iter().skip(i + 1).any(|item| item == owner),
@@ -200,11 +234,18 @@ pub struct CreateMultisig<'info> {
 
 #[derive(Accounts)]
 pub struct CreateTransaction<'info> {
-    multisig: Box<Account<'info, Multisig>>,
+    pub multisig: Box<Account<'info, Multisig>>,
     #[account(zero, signer)]
     transaction: Box<Account<'info, Transaction>>,
     // One of the owners. Checked in the handler.
     proposer: Signer<'info>,
+
+    /// CHECK: The address check is needed because otherwise
+    /// the supplied Sysvar could be anything else.
+    /// The Instruction Sysvar has not been implemented
+    /// in the Anchor framework yet, so this is the safe approach.
+    #[account(address = IX_ID)]
+    pub ix_sysvar: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -215,6 +256,13 @@ pub struct Approve<'info> {
     transaction: Box<Account<'info, Transaction>>,
     // One of the multisig owners. Checked in the handler.
     owner: Signer<'info>,
+
+    /// CHECK: The address check is needed because otherwise
+    /// the supplied Sysvar could be anything else.
+    /// The Instruction Sysvar has not been implemented
+    /// in the Anchor framework yet, so this is the safe approach.
+    #[account(address = IX_ID)]
+    pub ix_sysvar: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -244,10 +292,11 @@ pub struct ExecuteTransaction<'info> {
 
 #[account]
 pub struct Multisig {
-    pub owners: Vec<Pubkey>,
+    pub owners: Vec<[u8; 20]>,
     pub threshold: u64,
     pub nonce: u8,
     pub owner_set_seqno: u32,
+    pub last_transaction_id: u32,
 }
 
 #[account]
@@ -266,6 +315,8 @@ pub struct Transaction {
     pub did_execute: bool,
     // Owner set sequence number.
     pub owner_set_seqno: u32,
+
+    pub transaction_id: u32,
 }
 
 impl From<&Transaction> for Instruction {
