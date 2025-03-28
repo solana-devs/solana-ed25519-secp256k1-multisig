@@ -120,30 +120,9 @@ pub mod multisig {
         ctx: Context<'_, '_, '_, 'info, Auth<'info>>,
         owners: Vec<[u8; 20]>,
     ) -> Result<()> {
+        // Sets the owners field on the multisig. The only way this can be invoked
+        // is via a recursive call from execute_transaction -> set_owners.
         assert_unique_owners(&owners)?;
-        Ok(set_owners(
-            Context::new(
-                ctx.program_id,
-                ctx.accounts,
-                ctx.remaining_accounts,
-                ctx.bumps,
-            ),
-            owners,
-        )?)
-    }
-
-    // Set owners and threshold at once.
-    pub fn update_threshold<'info>(
-        ctx: Context<'_, '_, '_, 'info, Auth<'info>>,
-        threshold: u64,
-    ) -> Result<()> {
-        change_threshold(ctx, threshold)
-    }
-
-    // Sets the owners field on the multisig. The only way this can be invoked
-    // is via a recursive call from execute_transaction -> set_owners.
-    pub fn set_owners(ctx: Context<Auth>, owners: Vec<[u8; 20]>) -> Result<()> {
-        //todo check if the owners are unique
         require!(!owners.is_empty(), ErrorCodeMultiSig::InvalidOwnersLen);
 
         let multisig = &mut ctx.accounts.multisig;
@@ -154,14 +133,17 @@ pub mod multisig {
 
         multisig.owners = owners;
         multisig.owner_set_seqno += 1;
-
         Ok(())
     }
 
-    // Changes the execution threshold of the multisig. The only way this can be
-    // invoked is via a recursive call from execute_transaction ->
-    // change_threshold.
-    pub fn change_threshold(ctx: Context<Auth>, threshold: u64) -> Result<()> {
+    // Set owners and threshold at once.
+    pub fn update_threshold<'info>(
+        ctx: Context<'_, '_, '_, 'info, Auth<'info>>,
+        threshold: u64,
+    ) -> Result<()> {
+        // Changes the execution threshold of the multisig. The only way this can be
+        // invoked is via a recursive call from execute_transaction ->
+        // change_threshold.
         require!(threshold > 0, ErrorCodeMultiSig::InvalidThreshold);
         if threshold > ctx.accounts.multisig.owners.len() as u64 {
             return Err(ErrorCodeMultiSig::InvalidThreshold.into());
