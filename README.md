@@ -9,18 +9,23 @@
 
 Test cases:
 
-1. create_multisig with list of owners, threshold and nonce and validate that everything stored correctly in multisig PDA account.
+1. create_multisig
+   - 🚫 InvalidThreshold if threshold value is 0 or bigger then owners list len.
+   - 🚫 InvalidOwnersLen if owners list is empty.
+   - :white_check_mark: PASS. owners list is not empty and threshold in range from 0 to owners len
 2. create_transaction:
-   - 🚫 valid eth address wrong signature should fail
-   - 🚫 valid eth address that exists in multisig owner list but wrong signature should fail
-   - 🚫 valid eth address that exists in multisig owner list, correct signature but wrong MSG should fail! not allow to reuse random signature for valid eth multisig owner.
-   - :white_check_mark: valid eth address that exists in multisig owner list, correct signature and correct MSG(nonce + last_tx_id). Should PASS
+   - 🚫 Eth address not in multisig and wrong signature: Should Fail.
+   - 🚫 Eth address in multisig but wrong signature: Should Fail.
+   - 🚫 Eth address in multisig, correct signature but WRONG MSG: Should Fail! Not allow to reuse random signature for valid eth multisig owner.
+   - :white_check_mark: valid eth address that exists in multisig owner list, correct signature and correct MSG(nonce + last_tx_id). Should PASS.
+   - 🚫 Failed to reuse the same signature to create tx with dublicated tx id. Eth address in multisig address, correct signature but DUBLICATED MSG from past: Should Fail! Not allow to reuse random signature for valid eth multisig owner.
 3. approve:
-   - 🚫 valid eth address wrong signature should fail
-   - 🚫 valid eth address that exists in multisig owner list but wrong signature should fail
-   - 🚫 valid eth address that exists in multisig owner list, correct signature but wrong MSG should fail! not allow to reuse random signature for valid eth multisig owner.
-   - 🚫 valid eth address that exists in multisig owner list, correct signature but correct MSG from create_transaction workflow (nonce + last_tx_id). fail
-   - :white_check_mark: valid eth address that exists in multisig owner list, correct signature and correct MSG(nonce + last_tx_id + 1). Should PASS
+   - 🚫 Eth address not in multisig and wrong signature: Should Fail.
+   - 🚫 Eth address in multisig but wrong signature: Should Fail.
+   - 🚫 Eth address in multisig, correct signature but WRONG MSG: Should Fail! Not allow to reuse random signature for valid eth multisig owner.
+   - 🚫 Eth address in multisig, correct signature BUT incorrect MSG from create_transaction workflow (nonce + last_tx_id). Should Fail.
+   - 🚫 AlreadyExecuted. Eth address in multisig, correct signature and correct MSG(nonce + last_tx_id + 1). Should PASS.
+   - :white_check_mark: Eth address in multisig, correct signature and correct MSG(nonce + last_tx_id + 1). Should PASS.
 4. execute_instruction:
    - 🚫 execute tx with less approvals then threshold should Fail
    - 🚫 execute tx that already was executed should fail

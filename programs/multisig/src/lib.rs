@@ -100,6 +100,11 @@ pub mod multisig {
         bytes_last_transaction_id.push(1); //just to make it different from create_transaction msg
         let msg = bytes_last_transaction_id;
 
+        let tx = &ctx.accounts.transaction;
+        if tx.did_execute {
+            return Err(ErrorCodeMultiSig::AlreadyExecuted.into());
+        }
+
         // Check that ix is what we expect to have been sent
         utils::verify_secp256k1_ix(&ix, &eth_address, &msg, &sig, recovery_id)?;
         let owner_index = ctx
